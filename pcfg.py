@@ -59,6 +59,17 @@ class Tree(object):
       for production in self.right.iter_productions():
         yield production
 
+  def __hash__(self):
+    return hash((self.value, self.left, self.right))
+
+  def __eq__(self, other):
+    return isinstance(other, Tree) and hash(self) == hash(other)
+
+  def __str__(self):
+    return "Tree(%s, %s, %s)" % (self.value, self.left, self.right)
+
+  __repr__ = __str__
+
 
 class FixedPCFG(object):
   def __init__(self, start, terminals, nonterminals, productions, binary_weights, unary_weights):
@@ -96,6 +107,7 @@ def inside_outside(pcfg, sentence):
   # INSIDE
   # alpha[i, j, k] = inside score for nonterminal i with span [j, k]
   alpha = np.zeros((len(pcfg.nonterminals), len(sentence), len(sentence)))
+  backtrace = np.zeros((len(pcfg.nonterminals), len(sentence), len(sentence), 3), dtype=int)
   # base case: unary rewrites
   for i, nonterm in enumerate(pcfg.nonterminals):
     for j, word in enumerate(sentence):
@@ -110,10 +122,14 @@ def inside_outside(pcfg, sentence):
       # where `end` denotes an end up to and including the word at index `end`
       for i, nonterm in enumerate(pcfg.nonterminals):
         score = 0
+
+        # Keep backtrace for maximally scoring element
+        best_backtrace, best_backtrace_score = None, 0
+
         for split in range(1, span): # range(1, 2)
           # ==> split = 1
           for prod_idx, (left, right) in enumerate(pcfg.productions):
-            local_score = (
+            local_score = np.exp(
                 # Production score
                 np.log(pcfg.binary_weights[pcfg.nonterm2idx[nonterm], prod_idx]) +
                 # Left child score
@@ -121,9 +137,16 @@ def inside_outside(pcfg, sentence):
                 # Right child score
                 np.log(alpha[pcfg.nonterm2idx[right], j + split, k]))
 
-            score += np.exp(local_score)
+            score += local_score
+
+            if local_score > best_backtrace_score:
+              best_backtrace = (pcfg.nonterm2idx[left], pcfg.nonterm2idx[right],
+                                split)
+              best_backtrace_score = local_score
 
         alpha[i, j, k] = score
+        if best_backtrace is not None:
+          backtrace[i, j, k] = best_backtrace
 
   # OUTSIDE
   # beta[i, j, k] = outside score for nonterminal i with span [j, k]
@@ -178,7 +201,20 @@ def inside_outside(pcfg, sentence):
 
         beta[i, j, k] = left_score + right_score
 
-  return alpha, beta
+  return alpha, beta, backtrace
+
+
+def tree_from_backtrace(pcfg, sentence, backtrace):
+  def inner(i, j, k):
+    if j == k:
+      return Tree(pcfg.nonterminals[i], sentence[j], None)
+
+    left, right, split = backtrace[i, j, k]
+    left = inner(left, j, j + split - 1)
+    right = inner(right, j + split, k)
+    return Tree(pcfg.nonterminals[i], left, right)
+
+  return inner(pcfg.nonterm2idx[pcfg.start], 0, backtrace.shape[1] - 1)
 
 
 if __name__ == '__main__':
@@ -214,11 +250,15 @@ def test_inside_outside():
                    np.array([[0, 0],
                              [0.5, 0.5]]))
 
-  alphas, betas = inside_outside(pcfg, "c d".split())
+  sentence = "c d".split()
+  alphas, betas, backtrace = inside_outside(pcfg, sentence)
 
   from pprint import pprint
   pprint(list(zip(pcfg.nonterminals, alphas)))
   pprint(list(zip(pcfg.nonterminals, betas)))
+
+  assert_equal(tree_from_backtrace(pcfg, sentence, backtrace),
+               Tree("x", Tree("b", "c", None), Tree("b", "d", None)))
 
   # check alpha[x]
   np.testing.assert_allclose(alphas[0], [[0, 0.125],
@@ -226,3 +266,33 @@ def test_inside_outside():
   # check alpha[b] (preterminals)
   np.testing.assert_allclose(alphas[1], [[0.5, 0],
                                          [0, 0.5]])
+
+
+def test_inside_outside2():
+  pcfg = FixedPCFG("x",
+                   ["c", "d"],
+                   ["x", "b"],
+                   [("b", "b"), ("b", "x")],
+                   np.array([[0.25, 0.75],
+                             [0, 0]]),
+                   np.array([[0, 0],
+                             [0.5, 0.5]]))
+
+  sentence = "c d d".split()
+  alphas, betas, backtrace = inside_outside(pcfg, sentence)
+
+  from pprint import pprint
+  pprint(list(zip(pcfg.nonterminals, alphas)))
+  pprint(list(zip(pcfg.nonterminals, betas)))
+
+  assert_equal(tree_from_backtrace(pcfg, sentence, backtrace),
+               Tree("x", Tree("b", "c", None), Tree("x", Tree("b", "d", None), Tree("b", "d", None))))
+
+  # check alpha[x]
+  np.testing.assert_allclose(alphas[0], [[0, 0.0625, 0.023475],
+                                         [0, 0, 0.0625],
+                                         [0, 0, 0]], atol=1e-3)
+  # check alpha[b] (preterminals)
+  np.testing.assert_allclose(alphas[1], [[0.5, 0, 0],
+                                         [0, 0.5, 0],
+                                         [0, 0, 0.5]])
