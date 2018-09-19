@@ -6,6 +6,8 @@ PCFG parameters are approximated with mean-field variational inference.
 
 import numpy as np
 
+from nltk import Tree
+
 
 # class PCFG(object):
 #   """
@@ -22,53 +24,6 @@ import numpy as np
 #     self.phi_Z = phi_Z
 #     self.phi_E = phi_E
 #     self.phi_B = phi_B
-
-
-class Tree(object):
-  def __init__(self, value, left, right):
-    self.value = value
-    self.left = left
-    self.right = right
-
-  def iter_leaves(self):
-    if isinstance(self.left, Tree):
-      for leaf in self.left.iter_leaves():
-        yield leaf
-    else:
-      yield self.left
-
-    if isinstance(self.right, Tree):
-      for leaf in self.right.iter_leaves():
-        yield leaf
-    else:
-      yield self.right
-
-  def iter_productions(self):
-    if isinstance(self.left, Tree):
-      for production in self.left.iter_productions():
-        yield production
-      left_val = self.left.value
-    else:
-      left_val = self.left
-
-    right_val = self.right.value if isinstance(self.right, Tree) else self.right
-
-    yield (self.value, left_val, right_val)
-
-    if isinstance(self.right, Tree):
-      for production in self.right.iter_productions():
-        yield production
-
-  def __hash__(self):
-    return hash((self.value, self.left, self.right))
-
-  def __eq__(self, other):
-    return isinstance(other, Tree) and hash(self) == hash(other)
-
-  def __str__(self):
-    return "Tree(%s, %s, %s)" % (self.value, self.left, self.right)
-
-  __repr__ = __str__
 
 
 class FixedPCFG(object):
@@ -207,35 +162,14 @@ def inside_outside(pcfg, sentence):
 def tree_from_backtrace(pcfg, sentence, backtrace):
   def inner(i, j, k):
     if j == k:
-      return Tree(pcfg.nonterminals[i], sentence[j], None)
+      return Tree(pcfg.nonterminals[i], [sentence[j]])
 
     left, right, split = backtrace[i, j, k]
     left = inner(left, j, j + split - 1)
     right = inner(right, j + split, k)
-    return Tree(pcfg.nonterminals[i], left, right)
+    return Tree(pcfg.nonterminals[i], [left, right])
 
   return inner(pcfg.nonterm2idx[pcfg.start], 0, backtrace.shape[1] - 1)
-
-
-if __name__ == '__main__':
-  t = Tree("x", Tree("a", Tree("b", "c", None), Tree("b", "d", None)), Tree("e", "f", None))
-  for x in t.iter_productions():
-    print(x)
-
-  pcfg = FixedPCFG("x",
-                   ["c", "d", "f"],
-                   ["x", "a", "b", "e"],
-                   [("a", "e"), ("b", "b")],
-                   np.array([[1, 0],
-                             [0, 1],
-                             [0, 0],
-                             [0, 0]]),
-                   np.array([[0, 0, 0],
-                             [0, 0, 0],
-                             [0.5, 0.5, 0],
-                             [0, 0, 1]]))
-  print(pcfg.score_tree(t))
-
 
 
 from nose.tools import assert_equal
@@ -257,8 +191,9 @@ def test_inside_outside():
   pprint(list(zip(pcfg.nonterminals, alphas)))
   pprint(list(zip(pcfg.nonterminals, betas)))
 
+  tree_from_backtrace(pcfg, sentence, backtrace).pretty_print()
   assert_equal(tree_from_backtrace(pcfg, sentence, backtrace),
-               Tree("x", Tree("b", "c", None), Tree("b", "d", None)))
+               Tree.fromstring("(x (b c) (b d))"))
 
   # check alpha[x]
   np.testing.assert_allclose(alphas[0], [[0, 0.125],
@@ -285,8 +220,9 @@ def test_inside_outside2():
   pprint(list(zip(pcfg.nonterminals, alphas)))
   pprint(list(zip(pcfg.nonterminals, betas)))
 
+  tree_from_backtrace(pcfg, sentence, backtrace).pretty_print()
   assert_equal(tree_from_backtrace(pcfg, sentence, backtrace),
-               Tree("x", Tree("b", "c", None), Tree("x", Tree("b", "d", None), Tree("b", "d", None))))
+               Tree.fromstring("(x (b c) (x (b d) (b d)))"))
 
   # check alpha[x]
   np.testing.assert_allclose(alphas[0], [[0, 0.0625, 0.023475],
