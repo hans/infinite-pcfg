@@ -1,4 +1,9 @@
 """
+Currently:
+  Inference and learning via inside-outside + EM for PCFGs.
+
+Soon:
+
 Implementation of the infinite PCFG (HDP-PCFG) model from Liang et al. (2007).
 
 PCFG parameters are approximated with mean-field variational inference.
@@ -9,23 +14,6 @@ from copy import deepcopy
 import numpy as np
 
 from nltk import Tree
-
-
-# class PCFG(object):
-#   """
-#   Represents a particular parameter setting of a PCFG.
-#   """
-
-#   def __init__(self, phi_Z, phi_E, phi_B):
-#     """
-#     Args:
-#       phi_Z: Rule type parameters
-#       phi_E: Emission parameters
-#       phi_B: Branching parameters
-#     """
-#     self.phi_Z = phi_Z
-#     self.phi_E = phi_E
-#     self.phi_B = phi_B
 
 
 class FixedPCFG(object):
