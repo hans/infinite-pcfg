@@ -182,7 +182,8 @@ def inside_outside_update(pcfg, sentence):
             left_idx = pcfg.nonterm2idx[production[0]]
             right_idx = pcfg.nonterm2idx[production[1]]
 
-            # TODO describe mu in words
+            # mu(i -> l r, j, k): marginal probability of observing node i -> l
+            # r at span [j, k]
             mu = np.exp(
                 # outside probability of parent
                 np.log(beta[i, j, k]) +
@@ -218,6 +219,9 @@ def inside_outside_update(pcfg, sentence):
   ret = deepcopy(pcfg)
   ret.binary_weights = new_binary_weights
   ret.unary_weights = new_unary_weights
+  for i, nonterm in enumerate(pcfg.nonterminals):
+    for j, term in enumerate(pcfg.terminals):
+      print(new_unary_weights[i, j], nonterm, term)
   return ret
 
 
@@ -296,31 +300,92 @@ def test_inside_outside2():
                                          [0, 0, 0.5]])
 
 
+def _random_distr(shape):
+  ret = np.random.uniform(size=shape)
+  ret /= ret.sum(axis=1, keepdims=True)
+  return ret
+
+
 def test_inside_outside_update():
   pcfg = FixedPCFG("x",
                    ["c", "d"],
                    ["x", "b"],
                    [("b", "b"), ("b", "x")],
-                   np.array([[0.25, 0.75],
-                             [0, 0]]),
-                   np.array([[0, 0],
-                             [0.5, 0.5]]))
+                   _random_distr((2, 2)),
+                   _random_distr((2, 2)))
 
   sentence = "c d d".split()
-  pcfg = FixedPCFG("x",
-                   ["c", "d"],
-                   ["x", "b"],
-                   [("b", "b")],
-                   np.array([[0.5],
-                             [0]]),
-                   np.array([[0, 0],
-                             [0.5, 0.5]]))
 
-  sentence = "c d".split()
+  prev_total_prob = 0
 
-  for i in range(5):
+  for i in range(20):
     alphas, betas, backtrace = inside_outside(pcfg, sentence)
     total_prob = alphas[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
     print("%d\t%f" % (i, total_prob))
 
+    assert total_prob >= prev_total_prob, \
+        "Total prob should never decrease: %f -> %f (iter %d)" % \
+        (prev_total_prob, total_prob, i)
+    prev_total_prob = total_prob
+
     pcfg = inside_outside_update(pcfg, sentence)
+
+
+def test_inside_outside_binary_update():
+  """
+  Test EM update for binary weights in isolation.
+  """
+  pcfg = FixedPCFG("x",
+                   ["c", "d"],
+                   ["x", "b"],
+                   [("b", "b"), ("b", "x")],
+                   _random_distr((2, 2)),
+                   _random_distr((2, 2)))
+
+  sentence = "c d d".split()
+
+  prev_total_prob = 0
+
+  for i in range(20):
+    alphas, betas, backtrace = inside_outside(pcfg, sentence)
+    total_prob = alphas[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
+    print("%d\t%f" % (i, total_prob))
+
+    assert total_prob >= prev_total_prob, \
+        "Total prob should never decrease: %f -> %f (iter %d)" % \
+        (prev_total_prob, total_prob, i)
+    prev_total_prob = total_prob
+
+    new_pcfg = inside_outside_update(pcfg, sentence)
+    # Update only binary weights.
+    pcfg.binary_weights = new_pcfg.binary_weights
+
+
+def test_inside_outside_unary_update():
+  """
+  Test EM update for unary weights in isolation.
+  """
+  pcfg = FixedPCFG("x",
+                   ["c", "d"],
+                   ["x", "b"],
+                   [("b", "b"), ("b", "x")],
+                   _random_distr((2, 2)),
+                   _random_distr((2, 2)))
+
+  sentence = "c d d".split()
+
+  prev_total_prob = 0
+
+  for i in range(20):
+    alphas, betas, backtrace = inside_outside(pcfg, sentence)
+    total_prob = alphas[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
+    print("%d\t%f" % (i, total_prob))
+
+    assert total_prob >= prev_total_prob, \
+        "Total prob should never decrease: %f -> %f (iter %d)" % \
+        (prev_total_prob, total_prob, i)
+    prev_total_prob = total_prob
+
+    new_pcfg = inside_outside_update(pcfg, sentence)
+    # Update only unary weights.
+    pcfg.unary_weights = new_pcfg.unary_weights
