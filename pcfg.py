@@ -4,6 +4,8 @@ Implementation of the infinite PCFG (HDP-PCFG) model from Liang et al. (2007).
 PCFG parameters are approximated with mean-field variational inference.
 """
 
+from copy import deepcopy
+
 import numpy as np
 
 from nltk import Tree
@@ -37,7 +39,9 @@ class FixedPCFG(object):
     self.nonterm2idx = {symbol: idx for idx, symbol in enumerate(self.nonterminals)}
     self.production2idx = {production: idx for idx, production in enumerate(self.productions)}
 
+    # Binary rule weights, of dimension `len(nonterminals) * len(productions)`
     self.binary_weights = binary_weights
+    # Unary rule weights, of dimension `len(nonterminals) * len(terminals)`
     self.unary_weights = unary_weights
 
     assert self.start in self.nonterminals
@@ -59,6 +63,14 @@ class FixedPCFG(object):
 
 
 def inside_outside(pcfg, sentence):
+  """
+  Infer PCFG parses for `sentence` by the inside-outside algorithm.
+
+  Returns:
+    alpha: inside probabilities
+    beta: outside probabilities:
+    backtrace:
+  """
   # INSIDE
   # alpha[i, j, k] = inside score for nonterminal i with span [j, k]
   alpha = np.zeros((len(pcfg.nonterminals), len(sentence), len(sentence)))
@@ -69,11 +81,10 @@ def inside_outside(pcfg, sentence):
       alpha[i, j, j] = pcfg.unary_weights[i, pcfg.term2idx[word]]
 
   # recursive case
-  for span in range(2, len(sentence) + 1): # range(2, 3)
-    for j in range(0, len(sentence) - span + 1): # range(0, 3 - span)
+  for span in range(2, len(sentence) + 1):
+    for j in range(0, len(sentence) - span + 1):
       # End of nonterminal span (up to and including the word at this index)
       k = j + span - 1
-      # just one case: start = 0, span = 2, end = start + span - 1
       # where `end` denotes an end up to and including the word at index `end`
       for i, nonterm in enumerate(pcfg.nonterminals):
         score = 0
@@ -81,7 +92,7 @@ def inside_outside(pcfg, sentence):
         # Keep backtrace for maximally scoring element
         best_backtrace, best_backtrace_score = None, 0
 
-        for split in range(1, span): # range(1, 2)
+        for split in range(1, span):
           # ==> split = 1
           for prod_idx, (left, right) in enumerate(pcfg.productions):
             local_score = np.exp(
@@ -159,6 +170,69 @@ def inside_outside(pcfg, sentence):
   return alpha, beta, backtrace
 
 
+def inside_outside_update(pcfg, sentence):
+  """
+  Perform an inside-outside EM parameter update with the given sentence input.
+  """
+
+  # Run inside-outside inference.
+  alpha, beta, _ = inside_outside(pcfg, sentence)
+
+  # Calculate expected counts.
+  binary_counts = np.zeros((len(pcfg.nonterminals), len(pcfg.productions)))
+  unary_counts = np.zeros((len(pcfg.nonterminals), len(pcfg.terminals)))
+
+  # Calculate binary counts
+  for span in range(2, len(sentence) + 1):
+    for j in range(0, len(sentence) - span + 1):
+      # End of nonterminal span (up to and including the word at this index)
+      k = j + span - 1
+
+      for i, nonterm in enumerate(pcfg.nonterminals):
+        for split in range(1, span):
+          for prod_idx, production in enumerate(pcfg.productions):
+            left_idx = pcfg.nonterm2idx[production[0]]
+            right_idx = pcfg.nonterm2idx[production[1]]
+
+            # TODO describe mu in words
+            mu = np.exp(
+                # outside probability of parent
+                np.log(beta[i, j, k]) +
+                # binary production weight
+                np.log(pcfg.binary_weights[i, prod_idx]) +
+                # inside probability of left child
+                np.log(alpha[left_idx, j, j + split - 1]) +
+                # inside probability of right child
+                np.log(alpha[right_idx, j + split, k]))
+            binary_counts[i, prod_idx] += mu
+
+  # Calculate unary counts
+  for j, word in enumerate(sentence):
+    for i, nonterm in enumerate(pcfg.nonterminals):
+      term_idx = pcfg.term2idx[word]
+      unary_counts[i, term_idx] = np.exp(
+          # outside probability of parent
+          np.log(beta[i, j, j]) +
+          # unary production weight
+          np.log(pcfg.unary_weights[i, term_idx]))
+
+  # Normalize counts by total probability mass assigned to tree.
+  total_potential = alpha[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
+  binary_counts /= total_potential
+  unary_counts /= total_potential
+
+  # Perform weight update.
+  new_binary_weights = pcfg.binary_weights + binary_counts
+  new_unary_weights = pcfg.unary_weights + unary_counts
+  new_binary_weights /= new_binary_weights.sum(axis=1, keepdims=True) + 1e-6
+  new_unary_weights /= new_unary_weights.sum(axis=1, keepdims=True) + 1e-6
+
+  ret = deepcopy(pcfg)
+  ret.binary_weights = new_binary_weights
+  ret.unary_weights = new_unary_weights
+  return ret
+
+
 def tree_from_backtrace(pcfg, sentence, backtrace):
   def inner(i, j, k):
     if j == k:
@@ -232,3 +306,33 @@ def test_inside_outside2():
   np.testing.assert_allclose(alphas[1], [[0.5, 0, 0],
                                          [0, 0.5, 0],
                                          [0, 0, 0.5]])
+
+
+def test_inside_outside_update():
+  pcfg = FixedPCFG("x",
+                   ["c", "d"],
+                   ["x", "b"],
+                   [("b", "b"), ("b", "x")],
+                   np.array([[0.25, 0.75],
+                             [0, 0]]),
+                   np.array([[0, 0],
+                             [0.5, 0.5]]))
+
+  sentence = "c d d".split()
+  pcfg = FixedPCFG("x",
+                   ["c", "d"],
+                   ["x", "b"],
+                   [("b", "b")],
+                   np.array([[0.5],
+                             [0]]),
+                   np.array([[0, 0],
+                             [0.5, 0.5]]))
+
+  sentence = "c d".split()
+
+  for i in range(5):
+    alphas, betas, backtrace = inside_outside(pcfg, sentence)
+    total_prob = alphas[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
+    print("%d\t%f" % (i, total_prob))
+
+    pcfg = inside_outside_update(pcfg, sentence)
