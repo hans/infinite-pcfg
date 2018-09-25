@@ -17,7 +17,8 @@ from nltk import Tree
 
 
 class FixedPCFG(object):
-  def __init__(self, start, terminals, nonterminals, productions, binary_weights, unary_weights):
+  def __init__(self, start, terminals, nonterminals, productions,
+               binary_weights=None, unary_weights=None):
     self.start = start
     self.terminals = terminals
     self.nonterminals = nonterminals
@@ -26,6 +27,16 @@ class FixedPCFG(object):
     self.term2idx = {symbol: idx for idx, symbol in enumerate(self.terminals)}
     self.nonterm2idx = {symbol: idx for idx, symbol in enumerate(self.nonterminals)}
     self.production2idx = {production: idx for idx, production in enumerate(self.productions)}
+
+    if binary_weights is None:
+      binary_weights = np.random.uniform(size=(len(self.nonterminals), len(self.productions)))
+    if unary_weights is None:
+      unary_weights = np.random.uniform(size=(len(self.nonterminals), len(self.terminals)))
+
+    # Normalize weights.
+    total_mass = binary_weights.sum() + unary_weights.sum()
+    binary_weights /= total_mass
+    unary_weights /= total_mass
 
     # Binary rule weights, of dimension `len(nonterminals) * len(productions)`
     self.binary_weights = binary_weights
@@ -199,7 +210,7 @@ def inside_outside_update(pcfg, sentence):
   for j, word in enumerate(sentence):
     for i, nonterm in enumerate(pcfg.nonterminals):
       term_idx = pcfg.term2idx[word]
-      unary_counts[i, term_idx] = np.exp(
+      unary_counts[i, term_idx] += np.exp(
           # outside probability of parent
           np.log(beta[i, j, j]) +
           # unary production weight
@@ -213,15 +224,15 @@ def inside_outside_update(pcfg, sentence):
   # Perform weight update.
   new_binary_weights = pcfg.binary_weights + binary_counts
   new_unary_weights = pcfg.unary_weights + unary_counts
-  new_binary_weights /= new_binary_weights.sum(axis=1, keepdims=True) + 1e-6
-  new_unary_weights /= new_unary_weights.sum(axis=1, keepdims=True) + 1e-6
+  # Normalize per parent nonterminal.
+  Z = new_binary_weights.sum(axis=1, keepdims=True) + \
+      new_unary_weights.sum(axis=1, keepdims=True)
+  new_binary_weights /= Z
+  new_unary_weights /= Z
 
   ret = deepcopy(pcfg)
   ret.binary_weights = new_binary_weights
   ret.unary_weights = new_unary_weights
-  for i, nonterm in enumerate(pcfg.nonterminals):
-    for j, term in enumerate(pcfg.terminals):
-      print(new_unary_weights[i, j], nonterm, term)
   return ret
 
 
@@ -262,11 +273,11 @@ def test_inside_outside():
                Tree.fromstring("(x (b c) (b d))"))
 
   # check alpha[x]
-  np.testing.assert_allclose(alphas[0], [[0, 0.125],
-                                         [0, 0]])
+  np.testing.assert_allclose(alphas[0], [[0, 0.03703],
+                                         [0, 0]], atol=1e-5)
   # check alpha[b] (preterminals)
-  np.testing.assert_allclose(alphas[1], [[0.5, 0],
-                                         [0, 0.5]])
+  np.testing.assert_allclose(alphas[1], [[1/3., 0],
+                                         [0, 1/3.]])
 
 
 def test_inside_outside2():
@@ -291,28 +302,20 @@ def test_inside_outside2():
                Tree.fromstring("(x (b c) (x (b d) (b d)))"))
 
   # check alpha[x]
-  np.testing.assert_allclose(alphas[0], [[0, 0.0625, 0.023475],
-                                         [0, 0, 0.0625],
-                                         [0, 0, 0]], atol=1e-3)
+  np.testing.assert_allclose(alphas[0], [[0, 0.0078125, 0.00073242],
+                                         [0, 0, 0.0078125],
+                                         [0, 0, 0]], atol=1e-5)
   # check alpha[b] (preterminals)
-  np.testing.assert_allclose(alphas[1], [[0.5, 0, 0],
-                                         [0, 0.5, 0],
-                                         [0, 0, 0.5]])
-
-
-def _random_distr(shape):
-  ret = np.random.uniform(size=shape)
-  ret /= ret.sum(axis=1, keepdims=True)
-  return ret
+  np.testing.assert_allclose(alphas[1], [[1/4., 0, 0],
+                                         [0, 1/4., 0],
+                                         [0, 0, 1/4.]])
 
 
 def test_inside_outside_update():
   pcfg = FixedPCFG("x",
                    ["c", "d"],
                    ["x", "b"],
-                   [("b", "b"), ("b", "x")],
-                   _random_distr((2, 2)),
-                   _random_distr((2, 2)))
+                   [("b", "b"), ("b", "x")])
 
   sentence = "c d d".split()
 
@@ -323,69 +326,10 @@ def test_inside_outside_update():
     total_prob = alphas[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
     print("%d\t%f" % (i, total_prob))
 
-    assert total_prob >= prev_total_prob, \
+    # NB include small tolerance due to float imprecision
+    assert total_prob - prev_total_prob >= -1e4, \
         "Total prob should never decrease: %f -> %f (iter %d)" % \
         (prev_total_prob, total_prob, i)
     prev_total_prob = total_prob
 
     pcfg = inside_outside_update(pcfg, sentence)
-
-
-def test_inside_outside_binary_update():
-  """
-  Test EM update for binary weights in isolation.
-  """
-  pcfg = FixedPCFG("x",
-                   ["c", "d"],
-                   ["x", "b"],
-                   [("b", "b"), ("b", "x")],
-                   _random_distr((2, 2)),
-                   _random_distr((2, 2)))
-
-  sentence = "c d d".split()
-
-  prev_total_prob = 0
-
-  for i in range(20):
-    alphas, betas, backtrace = inside_outside(pcfg, sentence)
-    total_prob = alphas[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
-    print("%d\t%f" % (i, total_prob))
-
-    assert total_prob >= prev_total_prob, \
-        "Total prob should never decrease: %f -> %f (iter %d)" % \
-        (prev_total_prob, total_prob, i)
-    prev_total_prob = total_prob
-
-    new_pcfg = inside_outside_update(pcfg, sentence)
-    # Update only binary weights.
-    pcfg.binary_weights = new_pcfg.binary_weights
-
-
-def test_inside_outside_unary_update():
-  """
-  Test EM update for unary weights in isolation.
-  """
-  pcfg = FixedPCFG("x",
-                   ["c", "d"],
-                   ["x", "b"],
-                   [("b", "b"), ("b", "x")],
-                   _random_distr((2, 2)),
-                   _random_distr((2, 2)))
-
-  sentence = "c d d".split()
-
-  prev_total_prob = 0
-
-  for i in range(20):
-    alphas, betas, backtrace = inside_outside(pcfg, sentence)
-    total_prob = alphas[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
-    print("%d\t%f" % (i, total_prob))
-
-    assert total_prob >= prev_total_prob, \
-        "Total prob should never decrease: %f -> %f (iter %d)" % \
-        (prev_total_prob, total_prob, i)
-    prev_total_prob = total_prob
-
-    new_pcfg = inside_outside_update(pcfg, sentence)
-    # Update only unary weights.
-    pcfg.unary_weights = new_pcfg.unary_weights
