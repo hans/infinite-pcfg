@@ -110,7 +110,7 @@ def inside_outside(pcfg, sentence):
   for i, nonterm in enumerate(pcfg.nonterminals):
     for j in range(0, len(sentence)):
       for k in range(j, len(sentence)):
-        if i == 0 and k == len(sentence) - 1:
+        if j == 0 and k == len(sentence) - 1:
           # Do not recompute base case.
           continue
 
