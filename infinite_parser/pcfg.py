@@ -244,7 +244,7 @@ def inside_outside_update(pcfg, sentence):
           # unary production weight
           np.log(pcfg.unary_weights[i, term_idx]))
 
-  # Normalize counts by total probability mass assigned to tree.
+  # Weight counts by total probability mass assigned to tree.
   total_potential = alpha[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
   binary_counts /= total_potential
   unary_counts /= total_potential
