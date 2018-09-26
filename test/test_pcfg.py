@@ -3,7 +3,7 @@ from nose.tools import assert_equal
 from nltk import Tree
 import numpy as np
 
-from pcfg import FixedPCFG, inside_outside, inside_outside_update, tree_from_backtrace
+from infinite_parser.pcfg import FixedPCFG, inside_outside, inside_outside_update, tree_from_backtrace
 
 
 def test_inside_outside():
