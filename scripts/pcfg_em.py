@@ -13,8 +13,10 @@ from infinite_parser import pcfg as P
 sentences = [
     "the dog bit the man",
     "the man bit the dog",
-    # "the dog bit",
-    # "the man bit",
+    "the man gave the dog the treat",
+    "the dog gave the man the newspaper",
+    "the dog bit",
+    "the man bit",
 ]
 sentences = [sent.split() for sent in sentences]
 vocabulary = set(itertools.chain.from_iterable(sentences))
@@ -22,9 +24,11 @@ vocabulary = set(itertools.chain.from_iterable(sentences))
 # Build PCFG with random weights.
 pcfg = P.FixedPCFG("S",
                    terminals=list(vocabulary),
-                   nonterminals=["S", "NP", "VP", "N", "V", "D"],
-                   productions=[("NP", "VP"), ("V", "NP"), ("D", "N")])
+                   nonterminals=["S", "NP", "VP", "VP$"],
+                   preterminals=["N", "V", "D"],
+                   productions=[("NP", "VP"), ("V", "NP"), ("V", "VP$"), ("NP", "NP"), ("D", "N")])
 
+prev_ll = -np.inf
 for e in trange(40, desc="Epoch"):
   for sentence in tqdm(sentences):
     pcfg = P.inside_outside_update(pcfg, sentence)
@@ -37,6 +41,10 @@ for e in trange(40, desc="Epoch"):
     ll += np.log(total_prob)
 
   tqdm.write("%i ll: %f" % (e, ll))
+
+  if ll - prev_ll > 0 and ll - prev_ll <= 1e-3:
+    break
+  prev_ll = ll
 
 for sentence in sentences:
   print(sentence)
