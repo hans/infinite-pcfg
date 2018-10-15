@@ -15,6 +15,7 @@ Update algorithms:
 from copy import deepcopy
 
 import numpy as np
+from scipy.special import digamma
 
 
 def parse(pcfg, sentence):
@@ -155,14 +156,11 @@ def parse(pcfg, sentence):
   return alpha, beta, backtrace
 
 
-def update_em(pcfg, sentence):
+def expected_counts(pcfg, sentence):
   """
-  Perform an inside-outside EM parameter update with the given sentence input.
-
-  Returns:
-    new_pcfg: Copy of `pcfg` with updated weights.
+  Estimate marginal distributions over grammar weights, marginalizing out all
+  possible parses of `sentence` under `pcfg` via inside-outside.
   """
-
   # Run inside-outside inference.
   alpha, beta, _ = parse(pcfg, sentence)
 
@@ -207,10 +205,23 @@ def update_em(pcfg, sentence):
           # unary production weight
           np.log(pcfg.unary_weights[i, term_idx]))
 
-  # Weight counts by total probability mass assigned to tree.
-  total_potential = alpha[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
-  binary_counts /= total_potential
-  unary_counts /= total_potential
+  # Weight counts by total probability mass assigned to tree, marginalizing
+  # over parses.
+  Z = alpha[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
+  binary_counts /= Z
+  unary_counts /= Z
+
+  return unary_counts, binary_counts, Z
+
+
+def update_em(pcfg, sentence):
+  """
+  Perform an inside-outside EM parameter update with the given sentence input.
+
+  Returns:
+    new_pcfg: Copy of `pcfg` with updated weights.
+  """
+  unary_counts, binary_counts, _ = expected_counts(pcfg, sentence)
 
   # Perform weight update.
   new_binary_weights = pcfg.binary_weights + binary_counts
@@ -225,3 +236,57 @@ def update_em(pcfg, sentence):
   ret.unary_weights = new_unary_weights
   return ret
 
+
+def update_mean_field(pcfg, sentence, unary_prior=None, binary_prior=None):
+  """
+  Infer parser parameters $\\theta$ and a tree $z$ for the sentence which
+  maximizes the mean-field variational approximation
+
+  $$q(\\theta) q(z)$$
+
+  to the exact posterior $p(\\theta, z \\mid x)$, where $q(\\theta) =
+  q(\\phi^E) q(\\phi^B)$ are each distributed Dirichlet with prior parameters
+  $\\alpha^E, \\alpha^B$. This inference is performed
+  approximately, via coordinate ascent on the objective above.
+
+  Args:
+    unary_prior: Dirichlet prior parameters over unary rewrites.
+    binary_prior: Dirichlet prior parameters over binary rewrites.
+  """
+  # Prior over rewrite parameters phi^E, phi^B.
+  unary_shape = pcfg.unary_weights.shape
+  binary_shape = pcfg.binary_weights.shape
+  if unary_prior is None:
+    unary_prior = np.ones(unary_shape)
+  if binary_prior is None:
+    binary_prior = np.ones(binary_shape)
+  assert unary_prior.shape == unary_shape
+  assert binary_prior.shape == binary_shape
+
+  pcfg_ = deepcopy(pcfg)
+
+  while True:
+    # Prepare mean-field estimates of rewrite weights (eqs. 6--8).
+    unary_weights = np.exp(digamma(unary_prior))
+    binary_weights = np.exp(digamma(binary_prior))
+    unary_weights /= unary_weights.sum(axis=1, keepdims=True)
+    binary_weights /= binary_weights.sum(axis=1, keepdims=True)
+
+    pcfg_.unary_weights = unary_weights
+    pcfg_.binary_weights = binary_weights
+
+    # Mean-field coordinate update for q(z), computed using mean-field estimates
+    # over rewrite weights.
+    # (In other words: compute a posterior over parse trees q(z), via
+    # inside-outside.)
+    alphas, betas, backtrace = parse(pcfg_, sentence)
+
+    # Mean-field coordinate update for q(phi), computed using mean-field estimate
+    # over parse trees (eqns. 9--11).
+    unary_counts, binary_counts, _ = expected_counts(pcfg, sentence)
+
+    # Compute conjugate posterior over rewrite weights.
+    unary_prior += unary_counts
+    binary_prior += binary_counts
+
+  return unary_prior, binary_prior
