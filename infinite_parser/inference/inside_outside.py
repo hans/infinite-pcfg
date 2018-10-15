@@ -247,12 +247,15 @@ def update_mean_field(pcfg, sentence, unary_prior=None, binary_prior=None):
   to the exact posterior $p(\\theta, z \\mid x)$, where $q(\\theta) =
   q(\\phi^E) q(\\phi^B)$ are each distributed Dirichlet with prior parameters
   $\\alpha^E, \\alpha^B$. This inference is performed
-  approximately, via coordinate ascent on the objective above.
+  approximately, via a single step of coordinate ascent on the objective above.
 
   Args:
     unary_prior: Dirichlet prior parameters over unary rewrites.
     binary_prior: Dirichlet prior parameters over binary rewrites.
   """
+  # TODO resolve awkward non-use of pcfg here, except for structural params
+  # (e.g. shape of parameters)
+
   # Prior over rewrite parameters phi^E, phi^B.
   unary_shape = pcfg.unary_weights.shape
   binary_shape = pcfg.binary_weights.shape
@@ -265,28 +268,28 @@ def update_mean_field(pcfg, sentence, unary_prior=None, binary_prior=None):
 
   pcfg_ = deepcopy(pcfg)
 
-  while True:
-    # Prepare mean-field estimates of rewrite weights (eqs. 6--8).
-    unary_weights = np.exp(digamma(unary_prior))
-    binary_weights = np.exp(digamma(binary_prior))
-    unary_weights /= unary_weights.sum(axis=1, keepdims=True)
-    binary_weights /= binary_weights.sum(axis=1, keepdims=True)
+  # Prepare mean-field estimates of rewrite weights (eqs. 6--8).
+  unary_weights = np.exp(digamma(unary_prior))
+  binary_weights = np.exp(digamma(binary_prior))
+  unary_weights /= unary_weights.sum(axis=1, keepdims=True)
+  binary_weights /= binary_weights.sum(axis=1, keepdims=True)
 
-    pcfg_.unary_weights = unary_weights
-    pcfg_.binary_weights = binary_weights
+  pcfg_.unary_weights = unary_weights
+  pcfg_.binary_weights = binary_weights
 
-    # Mean-field coordinate update for q(z), computed using mean-field estimates
-    # over rewrite weights.
-    # (In other words: compute a posterior over parse trees q(z), via
-    # inside-outside.)
-    alphas, betas, backtrace = parse(pcfg_, sentence)
+  # Mean-field coordinate update for q(z), computed using mean-field estimates
+  # over rewrite weights.
+  # (In other words: compute a posterior over parse trees q(z), via
+  # inside-outside.)
+  alphas, betas, backtrace = parse(pcfg_, sentence)
 
-    # Mean-field coordinate update for q(phi), computed using mean-field estimate
-    # over parse trees (eqns. 9--11).
-    unary_counts, binary_counts, _ = expected_counts(pcfg, sentence)
+  # Mean-field coordinate update for q(phi), computed using mean-field estimate
+  # over parse trees (eqns. 9--11).
+  unary_counts, binary_counts, Z = expected_counts(pcfg, sentence)
+  # TODO unary_counts, binary_counts are zero matrices!
 
-    # Compute conjugate posterior over rewrite weights.
-    unary_prior += unary_counts
-    binary_prior += binary_counts
+  # Compute conjugate posterior over rewrite weights.
+  unary_prior += unary_counts
+  binary_prior += binary_counts
 
   return unary_prior, binary_prior
