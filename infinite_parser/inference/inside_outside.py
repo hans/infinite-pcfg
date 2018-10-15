@@ -271,8 +271,8 @@ def update_mean_field(pcfg, sentence, unary_prior=None, binary_prior=None):
   # Prepare mean-field estimates of rewrite weights (eqs. 6--8).
   unary_weights = np.exp(digamma(unary_prior))
   binary_weights = np.exp(digamma(binary_prior))
-  unary_weights /= unary_weights.sum(axis=1, keepdims=True)
-  binary_weights /= binary_weights.sum(axis=1, keepdims=True)
+  unary_weights /= np.exp(digamma(unary_prior.sum(axis=1, keepdims=True)))
+  binary_weights /= np.exp(digamma(binary_prior.sum(axis=1, keepdims=True)))
 
   pcfg_.unary_weights = unary_weights
   pcfg_.binary_weights = binary_weights
@@ -285,7 +285,9 @@ def update_mean_field(pcfg, sentence, unary_prior=None, binary_prior=None):
 
   # Mean-field coordinate update for q(phi), computed using mean-field estimate
   # over parse trees (eqns. 9--11).
-  unary_counts, binary_counts, Z = expected_counts(pcfg, sentence)
+  unary_counts, binary_counts, Z = expected_counts(pcfg_, sentence)
+  print(unary_counts)
+  print(Z)
   # TODO unary_counts, binary_counts are zero matrices!
 
   # Compute conjugate posterior over rewrite weights.
