@@ -17,6 +17,8 @@ sentences = [
     "the dog gave the man the newspaper",
     "the dog bit",
     "the man bit",
+    "the man sent the dog the newspaper",
+    "the man sent the dog",
 ]
 sentences = [sent.split() for sent in sentences]
 vocabulary = set(itertools.chain.from_iterable(sentences))
@@ -47,7 +49,7 @@ for e in trange(40, desc="Epoch"):
   prev_ll = ll
 
 for sentence in sentences:
-  print(sentence)
+  print(" ".join(sentence))
   alphas, betas, backtrace = P.inside_outside(pcfg, sentence)
   tree = P.tree_from_backtrace(pcfg, sentence, backtrace)
   tree.pretty_print()
