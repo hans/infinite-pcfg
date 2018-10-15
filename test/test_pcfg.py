@@ -3,7 +3,8 @@ from nose.tools import assert_equal
 from nltk import Tree
 import numpy as np
 
-from infinite_parser.pcfg import FixedPCFG, inside_outside, inside_outside_update, tree_from_backtrace
+from infinite_parser.inference.inside_outside import parse, update_em
+from infinite_parser.pcfg import FixedPCFG, tree_from_backtrace
 
 
 def test_inside_outside():
@@ -16,7 +17,7 @@ def test_inside_outside():
                    unary_weights=np.array([[0.5, 0.5]]))
 
   sentence = "c d".split()
-  alphas, betas, backtrace = inside_outside(pcfg, sentence)
+  alphas, betas, backtrace = parse(pcfg, sentence)
 
   from pprint import pprint
   pprint(list(zip(pcfg.nonterminals, alphas)))
@@ -44,7 +45,7 @@ def test_inside_outside2():
                    unary_weights=np.array([[0.5, 0.5]]))
 
   sentence = "c d d".split()
-  alphas, betas, backtrace = inside_outside(pcfg, sentence)
+  alphas, betas, backtrace = parse(pcfg, sentence)
 
   from pprint import pprint
   pprint(list(zip(pcfg.nonterminals, alphas)))
@@ -76,7 +77,7 @@ def test_inside_outside_update():
   prev_total_prob = 0
 
   for i in range(20):
-    alphas, betas, backtrace = inside_outside(pcfg, sentence)
+    alphas, betas, backtrace = parse(pcfg, sentence)
     total_prob = alphas[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
     print("%d\t%f" % (i, total_prob))
 
@@ -86,4 +87,4 @@ def test_inside_outside_update():
         (prev_total_prob, total_prob, i)
     prev_total_prob = total_prob
 
-    pcfg = inside_outside_update(pcfg, sentence)
+    pcfg = update_em(pcfg, sentence)

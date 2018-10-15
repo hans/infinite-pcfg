@@ -7,6 +7,7 @@ import itertools
 import numpy as np
 from tqdm import tqdm, trange
 
+from infinite_parser.inference import inside_outside as I
 from infinite_parser import pcfg as P
 
 
@@ -33,12 +34,12 @@ pcfg = P.FixedPCFG("S",
 prev_ll = -np.inf
 for e in trange(40, desc="Epoch"):
   for sentence in tqdm(sentences):
-    pcfg = P.inside_outside_update(pcfg, sentence)
+    pcfg = I.update_em(pcfg, sentence)
 
   # Calculate total probability of corpus.
   ll = 0
   for sentence in tqdm(sentences):
-    alphas, betas, _ = P.inside_outside(pcfg, sentence)
+    alphas, betas, _ = I.parse(pcfg, sentence)
     total_prob = alphas[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
     ll += np.log(total_prob)
 
@@ -50,6 +51,6 @@ for e in trange(40, desc="Epoch"):
 
 for sentence in sentences:
   print(" ".join(sentence))
-  alphas, betas, backtrace = P.inside_outside(pcfg, sentence)
+  alphas, betas, backtrace = I.parse(pcfg, sentence)
   tree = P.tree_from_backtrace(pcfg, sentence, backtrace)
   tree.pretty_print()
