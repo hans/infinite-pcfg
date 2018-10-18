@@ -2,8 +2,9 @@ from nose.tools import assert_equal
 
 from nltk import Tree
 import numpy as np
+from scipy.special import digamma
 
-from infinite_parser.inference.inside_outside import parse, update_em
+from infinite_parser.inference.inside_outside import parse, update_em, update_mean_field
 from infinite_parser.pcfg import FixedPCFG, tree_from_backtrace
 
 
@@ -65,7 +66,7 @@ def test_inside_outside2():
                                          [0, 0, 0.5]])
 
 
-def test_inside_outside_update():
+def test_inside_outside_em_update():
   pcfg = FixedPCFG("x",
                    terminals=["c", "d"],
                    nonterminals=["x"],
@@ -79,7 +80,40 @@ def test_inside_outside_update():
   for i in range(20):
     alphas, betas, backtrace = parse(pcfg, sentence)
     total_prob = alphas[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
+    tree_from_backtrace(pcfg, sentence, backtrace).pretty_print()
     print("%d\t%f" % (i, total_prob))
+
+    # NB include small tolerance due to float imprecision
+    assert total_prob - prev_total_prob >= 0, \
+        "Total prob should never decrease: %f -> %f (iter %d)" % \
+        (prev_total_prob, total_prob, i)
+    prev_total_prob = total_prob
+
+    pcfg = update_em(pcfg, sentence)
+
+
+def test_inside_outside_update_mean_field():
+  pcfg = FixedPCFG("x",
+                   terminals=["c", "d"],
+                   nonterminals=["x"],
+                   preterminals=["b"],
+                   productions=[("b", "b"), ("b", "x")])
+
+  sentence = "c d d".split()
+
+  prev_total_prob = 0
+  unary_prior, binary_prior = None, None
+
+  for i in range(20):
+    # if i > 0:
+    #   pcfg.unary_weights = np.exp(digamma(unary_prior))
+    #   pcfg.binary_weights = np.exp(digamma(binary_prior))
+    #   pcfg.unary_weights /= np.exp(digamma(unary_prior.sum(axis=1, keepdims=True)))
+    #   pcfg.binary_weights /= np.exp(digamma(binary_prior.sum(axis=1, keepdims=True)))
+
+    alphas, betas, backtrace = parse(pcfg, sentence)
+    total_prob = alphas[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]
+    print("here %d\t%f" % (i, total_prob))
 
     # NB include small tolerance due to float imprecision
     assert total_prob - prev_total_prob >= -1e4, \
@@ -87,4 +121,5 @@ def test_inside_outside_update():
         (prev_total_prob, total_prob, i)
     prev_total_prob = total_prob
 
-    pcfg = update_em(pcfg, sentence)
+    unary_prior, binary_prior = update_mean_field(pcfg, sentence,
+        unary_prior, binary_prior)
