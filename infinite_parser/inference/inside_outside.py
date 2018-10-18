@@ -63,7 +63,6 @@ def parse(pcfg, sentence):
         best_backtrace, best_backtrace_score = None, 0
 
         for split in range(1, span):
-          # ==> split = 1
           for prod_idx, (left, right) in enumerate(pcfg.productions):
             # Prepare index lookups for left/right children.
             left_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[left] \
@@ -99,20 +98,24 @@ def parse(pcfg, sentence):
                    len(sentence), len(sentence)))
   # base case
   beta[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1] = 1.0
-  for i, nonterm in enumerate(pcfg.nonterminals):
+  # recursive case
+  for i, node in enumerate(pcfg.nonterminals + pcfg.preterminals):
     for j in range(0, len(sentence)):
       for k in range(j, len(sentence)):
         if j == 0 and k == len(sentence) - 1:
           # Do not recompute base case.
           continue
+        elif i > len(pcfg.nonterminals) and j != k:
+          # Preterminals can only apply when j == k. Skip.
+          continue
 
         left_score, right_score = 0, 0
 
-        # First option: nonterm `i` appears with a sibling to the left
+        # First option: node `i` appears with a sibling to the left
         for left_start in range(0, j):
           for par_idx, left_parent in enumerate(pcfg.nonterminals):
             for prod_idx, (left, right) in enumerate(pcfg.productions):
-              if right != nonterm:
+              if right != node:
                 continue
 
               left_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[left] \
@@ -128,11 +131,11 @@ def parse(pcfg, sentence):
 
               left_score += np.exp(local_score)
 
-        # Second option: nonterm `i` appears with a sibling to the right
+        # Second option: node `i` appears with a sibling to the right
         for right_end in range(k + 1, len(sentence)):
           for par_idx, right_parent in enumerate(pcfg.nonterminals):
             for prod_idx, (left, right) in enumerate(pcfg.productions):
-              if left != nonterm:
+              if left != node:
                 continue
               elif left == right:
                 # Don't double-count case where siblings are identical.
@@ -178,9 +181,9 @@ def expected_counts(pcfg, sentence):
         for split in range(1, span):
           for prod_idx, (left, right) in enumerate(pcfg.productions):
             left_idx = pcfg.nonterm2idx[left] if left in pcfg.nonterm2idx \
-                else pcfg.preterm2idx[left]
+                else len(pcfg.nonterminals) + pcfg.preterm2idx[left]
             right_idx = pcfg.nonterm2idx[right] if right in pcfg.nonterm2idx \
-                else pcfg.preterm2idx[right]
+                else len(pcfg.nonterminals) + pcfg.preterm2idx[right]
 
             # mu(i -> l r, j, k): marginal probability of observing node i -> l
             # r at span [j, k]
