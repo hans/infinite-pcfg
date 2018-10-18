@@ -105,11 +105,11 @@ def test_inside_outside_update_mean_field():
   unary_prior, binary_prior = None, None
 
   for i in range(20):
-    # if i > 0:
-    #   pcfg.unary_weights = np.exp(digamma(unary_prior))
-    #   pcfg.binary_weights = np.exp(digamma(binary_prior))
-    #   pcfg.unary_weights /= np.exp(digamma(unary_prior.sum(axis=1, keepdims=True)))
-    #   pcfg.binary_weights /= np.exp(digamma(binary_prior.sum(axis=1, keepdims=True)))
+    if i > 0:
+      pcfg.unary_weights = np.exp(digamma(unary_prior))
+      pcfg.binary_weights = np.exp(digamma(binary_prior))
+      pcfg.unary_weights /= np.exp(digamma(unary_prior.sum(axis=1, keepdims=True)))
+      pcfg.binary_weights /= np.exp(digamma(binary_prior.sum(axis=1, keepdims=True)))
 
     alphas, betas, backtrace = parse(pcfg, sentence)
     total_prob = alphas[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1]

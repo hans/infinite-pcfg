@@ -289,9 +289,6 @@ def update_mean_field(pcfg, sentence, unary_prior=None, binary_prior=None):
   # Mean-field coordinate update for q(phi), computed using mean-field estimate
   # over parse trees (eqns. 9--11).
   unary_counts, binary_counts, Z = expected_counts(pcfg_, sentence)
-  print(unary_counts)
-  print(Z)
-  # TODO unary_counts, binary_counts are zero matrices!
 
   # Compute conjugate posterior over rewrite weights.
   unary_prior += unary_counts
