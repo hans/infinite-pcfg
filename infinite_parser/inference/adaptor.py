@@ -61,23 +61,35 @@ class InsideOutsideProjectedParser(InsideOutsideParser):
 
           for split in range(1, span):
             for prod_idx, (left, right) in enumerate(pcfg.productions):
-              # Prepare index lookups for left/right children.
-              left_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[left] \
-                  if left in pcfg.preterm2idx else pcfg.nonterm2idx[left]
-              right_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[right] \
-                  if right in pcfg.preterm2idx else pcfg.nonterm2idx[right]
+              # TODO make the "#" checks a bit less hacky
+              if ADAPTED_PRETERMINAL in [left, right] \
+                  and nonterm.strip("#") not in pcfg.ag.adapted_nonterminals:
+                # Rule out rewrites from non-adapted nonterminals to adapted
+                # yields.
+                local_score = 0
+              elif nonterm.endswith("#") and \
+                  set([left, right]) != set([ADAPTED_PRETERMINAL]):
+                # Rule out rewrites from adapted nonterminals to non-adapted
+                # yields.
+                local_score = 0
+              else:
+                # Prepare index lookups for left/right children.
+                left_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[left] \
+                    if left in pcfg.preterm2idx else pcfg.nonterm2idx[left]
+                right_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[right] \
+                    if right in pcfg.preterm2idx else pcfg.nonterm2idx[right]
 
-              # Calculate inside probabilities of left and right children.
-              left_score = alpha[left_idx, j, j + split - 1]
-              right_score = alpha[right_idx, j + split, k]
+                # Calculate inside probabilities of left and right children.
+                left_score = alpha[left_idx, j, j + split - 1]
+                right_score = alpha[right_idx, j + split, k]
 
-              local_score = np.exp(
-                  # Production score
-                  np.log(pcfg.binary_weights[pcfg.nonterm2idx[nonterm], prod_idx]) +
-                  # Left child score
-                  np.log(left_score) +
-                  # Right child score
-                  np.log(right_score))
+                local_score = np.exp(
+                    # Production score
+                    np.log(pcfg.binary_weights[pcfg.nonterm2idx[nonterm], prod_idx]) +
+                    # Left child score
+                    np.log(left_score) +
+                    # Right child score
+                    np.log(right_score))
 
               score += local_score
 
@@ -162,6 +174,8 @@ class AdaptorGrammar(object):
     words_in_adapted_yields = defaultdict(set)
     nonterminals = copy(self.nonterminals)
     productions = copy(self.productions)
+    productions.append((ADAPTED_PRETERMINAL, ADAPTED_PRETERMINAL))
+
     nonterminal_adapted_weights = {}
     for adapted_nonterm, adapted_productions in self.adapted_productions.items():
       max_production_length = 0
@@ -180,7 +194,7 @@ class AdaptorGrammar(object):
 
       # Add the relevant number of CNF-friendly nonterminals.
       new_nonterms = ["%s%s" % (adapted_nonterm, cnf_rewrite_char * i)
-                      for i in range(0, max_production_length - 1)]
+                      for i in range(1, max_production_length - 1)]
       nonterminals.extend(new_nonterms)
       # Also add the relevant production rules.
       productions.extend([(ADAPTED_PRETERMINAL, new_nonterm)
@@ -189,6 +203,7 @@ class AdaptorGrammar(object):
     # TODO prep weights
 
     return ProjectedPCFG(
+        ag=self,
         start=self.start,
         terminals=self.terminals,
         nonterminals=nonterminals,
@@ -242,6 +257,7 @@ class AdaptorGrammar(object):
 
 class ProjectedPCFG(FixedPCFG):
 
-  def __init__(self, words_in_adapted_yields=None, *args, **kwargs):
+  def __init__(self, ag, words_in_adapted_yields=None, *args, **kwargs):
     super().__init__(*args, **kwargs)
+    self.ag = ag
     self.words_in_adapted_yields = words_in_adapted_yields
