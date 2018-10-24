@@ -18,145 +18,180 @@ import numpy as np
 from scipy.special import digamma
 
 
-def parse(pcfg, sentence):
-  """
-  Infer PCFG parses for `sentence` by the inside-outside algorithm.
+class InsideOutsideParser(object):
 
-  Returns:
-    alpha: 3-dimensional array of inside probabilities. `alpha[i, j, k]`
-      denotes the inside probability of nonterminal `i` (or preterminal `i -
-      len(nonterminals)`) yielding the span `[j, k]` (inclusive on both ends).
-      Thus shape is `(len(nonterminals) + len(preterminals), len(sentence),
-      len(sentence))`.
-    beta: 3-dimensional array of outside probabilities; same design as `alpha`.
-    backtrace: Chart backtrace; can be used to reconstruct a maximal-scoring
-      tree. `backtrace[i, j, k]` is a 3-tuple `(left, right, split)` describing
-      the optimal left-nonterminal, right-nonterminal, and split point for a
-      nonterminal `i` spanning `[j, k]` (inclusive both ends). Here the left
-      child spans `[j, j + split - 1]` and the right child spans `[j + split,
-      k]`.
-  """
-  # INSIDE
-  # alpha[i, j, k] = inside score for nonterminal i or preterminal
-  # `i - len(nonterminals)` with span [j, k]
-  alpha = np.zeros((len(pcfg.nonterminals) + len(pcfg.preterminals),
-                    len(sentence), len(sentence)))
-  backtrace = np.zeros((len(pcfg.nonterminals) + len(pcfg.preterminals),
-                        len(sentence), len(sentence), 3), dtype=int)
-  # base case: unary rewrites
-  for i, preterm in enumerate(pcfg.preterminals):
-    for j, word in enumerate(sentence):
-      # preterminals are indexed after nonterminals in alpha array.
-      idx = len(pcfg.nonterminals) + i
-      alpha[idx, j, j] = pcfg.unary_weights[i, pcfg.term2idx[word]]
+  def __init__(self, pcfg):
+    self.pcfg = pcfg
 
-  # recursive case
-  for span in range(2, len(sentence) + 1):
-    for j in range(0, len(sentence) - span + 1):
-      # End of nonterminal span (up to and including the word at this index)
-      k = j + span - 1
-      # where `end` denotes an end up to and including the word at index `end`
-      for i, nonterm in enumerate(pcfg.nonterminals):
-        score = 0
+  def parse(self, sentence):
+    """
+    Infer PCFG parses for `sentence` by the inside-outside algorithm.
 
-        # Keep backtrace for maximally scoring element
-        best_backtrace, best_backtrace_score = None, 0
+    Returns:
+      alpha: 3-dimensional array of inside probabilities. `alpha[i, j, k]`
+        denotes the inside probability of nonterminal `i` (or preterminal `i -
+        len(nonterminals)`) yielding the span `[j, k]` (inclusive on both ends).
+        Thus shape is `(len(nonterminals) + len(preterminals), len(sentence),
+        len(sentence))`.
+      beta: 3-dimensional array of outside probabilities; same design as `alpha`.
+      backtrace: Chart backtrace; can be used to reconstruct a maximal-scoring
+        tree. `backtrace[i, j, k]` is a 3-tuple `(left, right, split)` describing
+        the optimal left-nonterminal, right-nonterminal, and split point for a
+        nonterminal `i` spanning `[j, k]` (inclusive both ends). Here the left
+        child spans `[j, j + split - 1]` and the right child spans `[j + split,
+        k]`.
+    """
+    pcfg = self.pcfg
 
-        for split in range(1, span):
-          for prod_idx, (left, right) in enumerate(pcfg.productions):
-            # Prepare index lookups for left/right children.
-            left_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[left] \
-                if left in pcfg.preterm2idx else pcfg.nonterm2idx[left]
-            right_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[right] \
-                if right in pcfg.preterm2idx else pcfg.nonterm2idx[right]
+    alpha, backtrace = self._inside(sentence)
+    beta = self._outside(sentence, alpha)
 
-            # Calculate inside probabilities of left and right children.
-            left_score = alpha[left_idx, j, j + split - 1]
-            right_score = alpha[right_idx, j + split, k]
+    return alpha, beta, backtrace
 
-            local_score = np.exp(
-                # Production score
-                np.log(pcfg.binary_weights[pcfg.nonterm2idx[nonterm], prod_idx]) +
-                # Left child score
-                np.log(left_score) +
-                # Right child score
-                np.log(right_score))
+  def _inside(self, sentence):
+    """
+    Compute inside scores for the given sentence.
 
-            score += local_score
+    Returns:
+      alpha: 3d ndarray where alpha[i, j, k] is the inside score for
+        nonterminal `i` or preterminal `i - len(nonterminals)` with span `[j,
+        k]`
+      backtrace: structure supporting Viterbi backtrace from any arbitrary node
+        `backtrace[i, j, k]` is a 3-tuple `(left, right, split_idx)` denoting
+        the max-scoring left child, right child, and split index for a node
+        with nonterminal `i` and span `[j, k]`. (`split_idx` is stated relative
+        to `j`.)
+    """
+    pcfg = self.pcfg
 
-            if local_score > best_backtrace_score:
-              best_backtrace = (left_idx, right_idx, split)
-              best_backtrace_score = local_score
+    alpha = np.zeros((len(pcfg.nonterminals) + len(pcfg.preterminals),
+                      len(sentence), len(sentence)))
+    backtrace = np.zeros((len(pcfg.nonterminals) + len(pcfg.preterminals),
+                          len(sentence), len(sentence), 3), dtype=int)
+    # base case: unary rewrites
+    for i, preterm in enumerate(pcfg.preterminals):
+      for j, word in enumerate(sentence):
+        # preterminals are indexed after nonterminals in alpha array.
+        idx = len(pcfg.nonterminals) + i
+        alpha[idx, j, j] = pcfg.unary_weights[i, pcfg.term2idx[word]]
 
-        alpha[i, j, k] = score
-        if best_backtrace is not None:
-          backtrace[i, j, k] = best_backtrace
+    # recursive case
+    for span in range(2, len(sentence) + 1):
+      for j in range(0, len(sentence) - span + 1):
+        # End of nonterminal span (up to and including the word at this index)
+        k = j + span - 1
+        # where `end` denotes an end up to and including the word at index `end`
+        for i, nonterm in enumerate(pcfg.nonterminals):
+          score = 0
 
-  # OUTSIDE
-  # beta[i, j, k] = outside score for nonterminal i with span [j, k]
-  beta = np.zeros((len(pcfg.nonterminals) + len(pcfg.preterminals),
-                   len(sentence), len(sentence)))
-  # base case
-  beta[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1] = 1.0
-  # recursive case
-  for i, node in enumerate(pcfg.nonterminals + pcfg.preterminals):
-    for j in range(0, len(sentence)):
-      for k in range(j, len(sentence)):
-        if j == 0 and k == len(sentence) - 1:
-          # Do not recompute base case.
-          continue
-        elif i > len(pcfg.nonterminals) and j != k:
-          # Preterminals can only apply when j == k. Skip.
-          continue
+          # Keep backtrace for maximally scoring element
+          best_backtrace, best_backtrace_score = None, 0
 
-        left_score, right_score = 0, 0
-
-        # First option: node `i` appears with a sibling to the left
-        for left_start in range(0, j):
-          for par_idx, left_parent in enumerate(pcfg.nonterminals):
+          for split in range(1, span):
             for prod_idx, (left, right) in enumerate(pcfg.productions):
-              if right != node:
-                continue
-
+              # Prepare index lookups for left/right children.
               left_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[left] \
                   if left in pcfg.preterm2idx else pcfg.nonterm2idx[left]
-
-              local_score = (
-                  # Production score
-                  np.log(pcfg.binary_weights[par_idx, prod_idx]) +
-                  # Left inner score
-                  np.log(alpha[left_idx, left_start, j - 1]) +
-                  # Outer score
-                  np.log(beta[par_idx, left_start, k]))
-
-              left_score += np.exp(local_score)
-
-        # Second option: node `i` appears with a sibling to the right
-        for right_end in range(k + 1, len(sentence)):
-          for par_idx, right_parent in enumerate(pcfg.nonterminals):
-            for prod_idx, (left, right) in enumerate(pcfg.productions):
-              if left != node:
-                continue
-              elif left == right:
-                # Don't double-count case where siblings are identical.
-                continue
-
               right_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[right] \
-                if right in pcfg.preterm2idx else pcfg.nonterm2idx[right]
+                  if right in pcfg.preterm2idx else pcfg.nonterm2idx[right]
 
-              local_score = (
+              # Calculate inside probabilities of left and right children.
+              left_score = alpha[left_idx, j, j + split - 1]
+              right_score = alpha[right_idx, j + split, k]
+
+              local_score = np.exp(
                   # Production score
-                  np.log(pcfg.binary_weights[par_idx, prod_idx]) +
-                  # Outer score
-                  np.log(beta[par_idx, j, right_end]) +
-                  # Right inner score
-                  np.log(alpha[right_idx, k + 1, right_end]))
+                  np.log(pcfg.binary_weights[pcfg.nonterm2idx[nonterm], prod_idx]) +
+                  # Left child score
+                  np.log(left_score) +
+                  # Right child score
+                  np.log(right_score))
 
-              right_score += np.exp(local_score)
+              score += local_score
 
-        beta[i, j, k] = left_score + right_score
+              if local_score > best_backtrace_score:
+                best_backtrace = (left_idx, right_idx, split)
+                best_backtrace_score = local_score
 
-  return alpha, beta, backtrace
+          alpha[i, j, k] = score
+          if best_backtrace is not None:
+            backtrace[i, j, k] = best_backtrace
+
+    return alpha, backtrace
+
+  def _outside(self, sentence, alpha):
+    """
+    Calculate outside scores for a sentence given inside scores `alpha`.
+    """
+    pcfg = self.pcfg
+
+    beta = np.zeros((len(pcfg.nonterminals) + len(pcfg.preterminals),
+                    len(sentence), len(sentence)))
+    # base case
+    beta[pcfg.nonterm2idx[pcfg.start], 0, len(sentence) - 1] = 1.0
+    # recursive case
+    for i, node in enumerate(pcfg.nonterminals + pcfg.preterminals):
+      for j in range(0, len(sentence)):
+        for k in range(j, len(sentence)):
+          if j == 0 and k == len(sentence) - 1:
+            # Do not recompute base case.
+            continue
+          elif i > len(pcfg.nonterminals) and j != k:
+            # Preterminals can only apply when j == k. Skip.
+            continue
+
+          left_score, right_score = 0, 0
+
+          # First option: node `i` appears with a sibling to the left
+          for left_start in range(0, j):
+            for par_idx, left_parent in enumerate(pcfg.nonterminals):
+              for prod_idx, (left, right) in enumerate(pcfg.productions):
+                if right != node:
+                  continue
+
+                left_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[left] \
+                    if left in pcfg.preterm2idx else pcfg.nonterm2idx[left]
+
+                local_score = (
+                    # Production score
+                    np.log(pcfg.binary_weights[par_idx, prod_idx]) +
+                    # Left inner score
+                    np.log(alpha[left_idx, left_start, j - 1]) +
+                    # Outer score
+                    np.log(beta[par_idx, left_start, k]))
+
+                left_score += np.exp(local_score)
+
+          # Second option: node `i` appears with a sibling to the right
+          for right_end in range(k + 1, len(sentence)):
+            for par_idx, right_parent in enumerate(pcfg.nonterminals):
+              for prod_idx, (left, right) in enumerate(pcfg.productions):
+                if left != node:
+                  continue
+                elif left == right:
+                  # Don't double-count case where siblings are identical.
+                  continue
+
+                right_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[right] \
+                  if right in pcfg.preterm2idx else pcfg.nonterm2idx[right]
+
+                local_score = (
+                    # Production score
+                    np.log(pcfg.binary_weights[par_idx, prod_idx]) +
+                    # Outer score
+                    np.log(beta[par_idx, j, right_end]) +
+                    # Right inner score
+                    np.log(alpha[right_idx, k + 1, right_end]))
+
+                right_score += np.exp(local_score)
+
+          beta[i, j, k] = left_score + right_score
+
+    return beta
+
+
+def parse(pcfg, sentence):
+  return InsideOutsideParser(pcfg).parse(sentence)
 
 
 def expected_counts(pcfg, sentence):
