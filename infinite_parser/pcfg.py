@@ -76,6 +76,11 @@ def tree_from_backtrace(pcfg, sentence, backtrace):
       return Tree(pcfg.preterminals[i], [sentence[j]])
 
     left, right, split = backtrace[i, j, k]
+    if split == 0:
+      # 0 is the default value in the `backtrace` array (and never semantically
+      # valid for the `split` value). So we never visited this constituent.
+      # That means no parse was computed.
+      return None
     left = inner(left, j, j + split - 1)
     right = inner(right, j + split, k)
     return Tree(pcfg.nonterminals[i], [left, right])
