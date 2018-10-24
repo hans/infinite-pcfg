@@ -61,6 +61,12 @@ class InsideOutsideProjectedParser(InsideOutsideParser):
 
           for split in range(1, span):
             for prod_idx, (left, right) in enumerate(pcfg.productions):
+              # Prepare index lookups for left/right children.
+              left_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[left] \
+                  if left in pcfg.preterm2idx else pcfg.nonterm2idx[left]
+              right_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[right] \
+                  if right in pcfg.preterm2idx else pcfg.nonterm2idx[right]
+
               # TODO make the "#" checks a bit less hacky
               if ADAPTED_PRETERMINAL in [left, right] \
                   and nonterm.strip("#") not in pcfg.ag.adapted_nonterminals:
@@ -72,13 +78,15 @@ class InsideOutsideProjectedParser(InsideOutsideParser):
                 # Rule out rewrites from adapted nonterminals to non-adapted
                 # yields.
                 local_score = 0
+              elif nonterm in pcfg.ag.adapted_nonterminals and \
+                  ((set([left, right]) == set([ADAPTED_PRETERMINAL]))
+                      or (left == ADAPTED_PRETERMINAL and right.endswith("#"))):
+                # Special case: compute adapted nonterminal weight based on
+                # projected PCFG weight.
+                adapted_yield = tuple(sentence[j:k+1])
+                # TODO compute weight properly
+                local_score = pcfg.ag.adapted_productions[nonterm][adapted_yield]
               else:
-                # Prepare index lookups for left/right children.
-                left_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[left] \
-                    if left in pcfg.preterm2idx else pcfg.nonterm2idx[left]
-                right_idx = len(pcfg.nonterminals) + pcfg.preterm2idx[right] \
-                    if right in pcfg.preterm2idx else pcfg.nonterm2idx[right]
-
                 # Calculate inside probabilities of left and right children.
                 left_score = alpha[left_idx, j, j + split - 1]
                 right_score = alpha[right_idx, j + split, k]
